@@ -1026,7 +1026,9 @@ class MdStyle:
             logo = logo,
             showLink = showLink,
             style = self,
-            noDecoration=noDecoration
+            noDecoration=noDecoration,
+            sgexter=sgexter,
+            sgm=sgm
         )
 
     def Render(
@@ -1107,7 +1109,9 @@ class MdStyle:
             logo=logo,
             showLink=showLink,
             style=self,
-            noDecoration=noDecoration
+            noDecoration=noDecoration,
+            sgexter=sgexter,
+            sgm=sgm
         ))
 
 
@@ -1706,22 +1710,26 @@ async def MdToImage(
             while idx+1<textS and text[idx+1]==" ":
                 idx += 1
             continue
-        elif not textMode and i.isdigit() and not codeMode:
+        elif not textMode and i.isdigit() and not codeMode and xidx == 1:
             tempIdx = idx-1
-            flag = False
+            flag1 = False
+            flag2 = False
             number = ""
             while  tempIdx<textS-1 and text[tempIdx+1]!="\n":
                 tempIdx+=1
                 if text[tempIdx].isdigit():
                     number+=text[tempIdx]
                 elif text[tempIdx] == ".":
-                    flag = True
+                    flag1 = True
+                elif text[tempIdx] == " " and flag1:
+                    flag2 = True
                     break
                 else:
                     break
-            if flag:
+            if flag1 and flag2:
+                s = int(nowf.size)
                 idx = tempIdx
-                nx += 30
+                nx += s
                 while idx+1<textS and text[idx+1]==" ":
                     idx += 1
                 continue
@@ -1733,7 +1741,7 @@ async def MdToImage(
                 idx += 1
             while idx+1<textS and text[idx+1]==" ":
                 idx += 1
-            nx += 30*(citeNum)+5
+            nx += style.citeDistance*(citeNum)+5
             continue
         elif not textMode and idx+2 <= textS and text[idx:idx+3] in ["```","~~~"]:
             ny+=codeUb
@@ -1796,7 +1804,7 @@ async def MdToImage(
                     formNowLNum = len(form[ii])
 
                     if formNowLNum<formHeadNum:
-                        form[ii] = form[ii]+[""]*(formHeadNum-formNowLNum)
+                        form[ii] = form[ii]+[""]*(formHeadNum-formNowLNum) #type: ignore
                     if formNowLNum>formHeadNum:
                         form = form[0:formHeadNum]
 
@@ -2487,27 +2495,31 @@ async def MdToImage(
             while idx+1<textS and text[idx+1]==" ":
                 idx += 1
             continue
-        elif not textMode and i.isdigit() and not codeMode:
+        elif not textMode and i.isdigit() and not codeMode and xidx == 1:
             tempIdx = idx-1
-            flag = False
+            flag1 = False
+            flag2 = False
             number = ""
             while  tempIdx<textS-1 and text[tempIdx+1]!="\n":
                 tempIdx+=1
                 if text[tempIdx].isdigit():
                     number+=text[tempIdx]
                 elif text[tempIdx] == ".":
-                    flag = True
+                    flag1 = True
+                elif text[tempIdx] == " " and flag1:
+                    flag2 = True
                     break
                 else:
                     break
-            if flag:
+            if flag1 and flag2:
+                gf = GetGFont(nowf)
                 idx = tempIdx
-                h = hs[yidx-1]
+                h = int(nowf.size)
                 s = int(style.codeBlockFontSize*0.67)
                 zx,zy = lb+nx+int(h/2),ub+ny+int(hs[yidx-1]/2)+1
                 draw.polygon([(zx-s,zy),(zx,zy-s),(zx+s,zy),(zx,zy+s)],style.orderedListDotColor)
-                sz = fontC.GetSize(number)
-                draw.text((zx-int((sz[0]-1)/2),zy-int(fontC.size/2)-1),number,style.orderedListNumberColor,fontC)
+                sz = gf.GetSize(number)
+                draw.text((zx-int((sz[0]-1)/2),zy-int(sz[1]/2)-1),number,style.orderedListNumberColor,gf)
                 nx += h
                 while idx+1<textS and text[idx+1]==" ":
                     idx += 1
@@ -2892,13 +2904,11 @@ async def MdToImage(
             if not Setting.LOGO_PATH:
                 raise ValueError("logo is a string but Setting.LOGO_PATH is not set. Please set Setting.LOGO_PATH.")
             logoImg = Image.open(Setting.LOGO_PATH / logo).convert("RGBA")
-            if imgUnder.width<logoImg.width or imgUnder.height<logoImg.height:
-                continue
-            imgUnder.alpha_composite(logoImg, (int(imgUnder.width - logoImg.width),0))
+            if not (imgUnder.width<logoImg.width or imgUnder.height<logoImg.height):
+                imgUnder.alpha_composite(logoImg, (int(imgUnder.width - logoImg.width),0))
         elif isinstance(logo, Image.Image):
-            if imgUnder.width<logo.width or imgUnder.height<logo.height:
-                continue
-            imgUnder.alpha_composite(logo.convert("RGBA"), (int(imgUnder.width - logo.width),0))
+            if not (imgUnder.width<logo.width or imgUnder.height<logo.height):
+                imgUnder.alpha_composite(logo.convert("RGBA"), (int(imgUnder.width - logo.width),0))
         imgUnder.alpha_composite(imgEffect)
 
         if bt and paintImage:
@@ -2914,6 +2924,7 @@ async def MdToImage(
             imgUnders[1].alpha_composite(style.decorates.DrawTop(int(txs),tys))
         
         playbackSequence = style.decorates.playbackSequence
+
 
     if gifPage and len(imgUnders) > 1:
         ftype = "gif"
