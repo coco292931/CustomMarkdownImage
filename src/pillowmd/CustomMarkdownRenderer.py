@@ -2419,6 +2419,16 @@ async def MdToImage(
 
         islatex = False
 
+        # 修复：清除已经走过的 latex 条目。
+        # 当某个公式渲染出的子图数量恰好等于它在源码中占用的字符数时
+        # （例如 "x"、"y=x" 这类简单公式），下方的 `nowlatexImageIdx >= len(images)`
+        # 分支永远不会触发，导致 `del latexs[0]` 不执行、过期条目滞留在 latexs[0]，
+        # 进而使其后的所有公式都匹配不到绘制窗口、退化成字面文本。
+        # 在每次循环开头丢弃所有 end 已经被 idx 越过的条目即可根治。
+        while latexs and idx >= latexs[0]["end"]:
+            del latexs[0]
+            nowlatexImageIdx = -1
+
         if latexs and latexs[0]["begin"]< idx <latexs[0]["end"]:
             # print(latexs[0])
             nowlatexImageIdx += 1
