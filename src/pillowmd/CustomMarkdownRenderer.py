@@ -693,20 +693,20 @@ class ImageDrawPro(ImageDraw.ImageDraw):
         em = int(useFont.size)
         h = max(1, int(em * 1.6))
         shear = 0.25  # 错切系数：值越大越倾斜
-        pad = int(em * shear) + 2  # 留白以 em 高度为基准，避免随 tile 高度膨胀
+        # 以文字主体中线（约 em/2）为错切支点：顶部右移、底部左移、中线不动，
+        # 使倾斜后的视觉重心仍居中，而非整体偏右。两侧各需 shear*em/2 的留白。
+        yc = em / 2
+        pad = int(shear * yc) + 2
         tile = Image.new("RGBA", (w + pad * 2, h), (0, 0, 0, 0))
         td = ImageDraw.Draw(tile)
-        # 文字按 em 顶部对齐绘制；与主图 super().text 的 (x, y) 基准一致，
-        # 故下方贴回时用 (xy[1] - mv) 不另加偏移。
         td.text((pad, 0), text, fill, useFont)
         if blod:
             for a, b in [(-1, 0), (1, 0)]:
                 td.text((pad + a, b), text, fill, useFont)
-        # AFFINE：x' = x + shear*(h - y)，即底部不动、顶部右移。
-        # 以 tile 高度 h 为参考使整块一致错切。
+        # AFFINE：x_src = x_dst + shear*(y_dst - yc)，即 y=yc 处不动、上右下左对称错切。
         tile = tile.transform(
             tile.size, Image.AFFINE,
-            (1, shear, -shear * h, 0, 1, 0),
+            (1, shear, -shear * yc, 0, 1, 0),
             resample=Image.BICUBIC,
         )
         self._image.alpha_composite(tile, (int(xy[0] - pad), int(xy[1] - mv)))
