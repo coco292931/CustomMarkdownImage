@@ -2947,9 +2947,18 @@ async def MdToImage(
             if debug:
                 print("islatex")
             img: pillowlatex.LaTeXImage = latexs[0]["images"][nowlatexImageIdx]
+            if latexs[0]["super"]:
+                # 行间公式（$$...$$）独占整行，按行高居中即可。
+                latexTop = ub + ny + (hs[yidx-1] - img.height) // 2 - img.space
+            else:
+                # 行内公式（$...$）应与同行正文的垂直中心对齐，而非行高中心：
+                # 正文按基线绘制、底对齐到 hs，其竖直中心约为 hs - font.size/2；
+                # 公式比正文高时若按行高居中会整体上浮、与文字错位。
+                textCenterY = ub + ny + hs[yidx-1] - font.size / 2
+                latexTop = int(textCenterY - img.height / 2) - img.space
             drawEffect.rectangle((lb+nx+xbase, ub+ny, lb+nx+img.width+xbase, ub+ny+hs[yidx-1]),style.expressionUnderpainting)
             imgText.alpha_composite(
-                img.img, (lb+nx-img.space+xbase, ub+ny+(hs[yidx-1]-img.height) // 2-img.space)
+                img.img, (lb+nx-img.space+xbase, latexTop)
             )
         elif isImage and isinstance(nowImage,Image.Image):
             #drawImage.rectangle((lb+nx-1,ub+ny+hs[yidx-1]-nowImage.size[1]-1,lb+nx+nowImage.size[0]+1,ub+ny+hs[yidx-1]+1),None,"#99FFCCAA",2)
