@@ -617,9 +617,9 @@ class MixFont(FreeTypeFont):
 
 class ImageDrawPro(ImageDraw.ImageDraw):
     def __init__(
-            self, im, 
-            lock_color = None, 
-            blod_mode = None, 
+            self, im,
+            lock_color = None,
+            blod_mode = None,
             delete_line_mode = None,
             under_line_mode = None,
             mode=None
@@ -629,7 +629,8 @@ class ImageDrawPro(ImageDraw.ImageDraw):
         self.text_blod_mode = blod_mode
         self.delete_line_mode = delete_line_mode
         self.under_line_mode = under_line_mode
-    
+        self.italic_mode = False
+
     def text(
             self,
             xy,
@@ -640,6 +641,7 @@ class ImageDrawPro(ImageDraw.ImageDraw):
             use_blod_mode = True,
             use_delete_line_mode = True,
             use_under_line_mode = True,
+            use_italic_mode = True,
             *args,
             **kwargs,
         ):
@@ -659,12 +661,18 @@ class ImageDrawPro(ImageDraw.ImageDraw):
 
         if self.text_lock_color != None and use_lock_color:
             fill = self.text_lock_color
-        
-        super().text((xy[0],xy[1]-mv),text,fill,useFont,*args,**kwargs)
-        if self.text_blod_mode and use_blod_mode:
-            for a,b in [(-1,0),(1,0)]:
-                super().text((xy[0]+a,xy[1]+b-mv),text,fill,useFont,*args,**kwargs)
-        
+
+        if self.italic_mode and use_italic_mode and text.strip():
+            # 伪斜体：将字符绘制到独立图块后做 x 方向错切（shear），再贴回。
+            # 字体本身无斜体字形，故用错切近似；错切会使字顶右移，调用方需在
+            # 斜体片段前后补空格留白，避免与相邻字符重叠。
+            self._draw_italic(xy, text, fill, useFont, mv, use_blod_mode and self.text_blod_mode)
+        else:
+            super().text((xy[0],xy[1]-mv),text,fill,useFont,*args,**kwargs)
+            if self.text_blod_mode and use_blod_mode:
+                for a,b in [(-1,0),(1,0)]:
+                    super().text((xy[0]+a,xy[1]+b-mv),text,fill,useFont,*args,**kwargs)
+
         if self.delete_line_mode or self.under_line_mode:
             xs,ys = font.GetSize(text)
 
@@ -673,6 +681,55 @@ class ImageDrawPro(ImageDraw.ImageDraw):
 
         if self.under_line_mode and use_under_line_mode:
             super().line((xy[0],xy[1]+font.size+2,xy[0]+xs,xy[1]+font.size+2),fill,int(font.size/10)+1)
+
+    def _draw_italic(self, xy, text, fill, useFont, mv, blod):
+        """将文本绘制到临时图块并做 x 方向错切，模拟斜体后贴回主图。"""
+        size = useFont.GetSize(text)
+        w = max(1, size[0])
+        h = max(1, useFont.size + (size[1] if size[1] else useFont.size))
+        shear = 0.25  # 错切系数：值越大越倾斜
+        pad = int(h * shear) + 2
+        tile = Image.new("RGBA", (w + pad * 2, h), (0, 0, 0, 0))
+        td = ImageDraw.Draw(tile)
+        td.text((pad, 0), text, fill, useFont)
+        if blod:
+            for a, b in [(-1, 0), (1, 0)]:
+                td.text((pad + a, b), text, fill, useFont)
+        # AFFINE：x' = x + shear*(h - y)，即底部不动、顶部右移
+        tile = tile.transform(
+            tile.size, Image.AFFINE,
+            (1, shear, -shear * h, 0, 1, 0),
+            resample=Image.BICUBIC,
+        )
+        self._image.alpha_composite(tile, (int(xy[0] - pad), int(xy[1] - mv)))
+
+
+def _is_italic_marker(text: str, idx: int, textS: int, xidx: int) -> bool:
+    """判断 text[idx] 处的单个 '*' 是否为斜体起始/结束标记。
+
+    规则（与无序列表消歧）：
+    - 必须是单星号（前后都不是 '*'，双星号留给加粗）
+    - 行首的 '* '（星号 + 空格）是无序列表项，不算斜体
+    - 其后须在同一行内存在配对的单星号，才认定为斜体片段
+    """
+    if text[idx] != "*":
+        return False
+    # 双星号交给加粗逻辑
+    if idx + 1 < textS and text[idx + 1] == "*":
+        return False
+    if idx >= 1 and text[idx - 1] == "*":
+        return False
+    # 行首 "* " 是列表项
+    if xidx == 1 and idx + 1 < textS and text[idx + 1] == " ":
+        return False
+    # 同行内需有配对单星号
+    j = idx + 1
+    while j < textS and text[j] != "\n":
+        if text[j] == "*" and text[j - 1] != "*" and (j + 1 >= textS or text[j + 1] != "*"):
+            return True
+        j += 1
+    return False
+
 
 def GetArgs(args:str)->tuple[list[Any],dict[str,Any]]:
     args+=","
@@ -1558,6 +1615,8 @@ async def MdToImage(
     """表达式模式"""
     bMode2: bool = False
     """行中代码模式"""
+    iMode: bool = False
+    """斜体模式（测量遍）"""
     lMode: bool = False
     """删除线模式"""
     codeMode: bool = False
@@ -1871,6 +1930,12 @@ async def MdToImage(
         
         if i == "*" and idx+1<textS and text[idx+1] == "*" and not codeMode:
             idx+=1
+            continue
+        if i == "*" and not codeMode and (iMode or _is_italic_marker(text, idx, textS, xidx)):
+            # 斜体标记：消费 '*'，预留一个空格宽度作为错切留白；同步翻转斜体状态，
+            # 使结束标记（此时 iMode 为真）也能被正确消费，不残留字面星号。
+            iMode = not iMode
+            nx += nowf.GetSize(" ")[0]
             continue
         if i == "~" and idx+1<textS and text[idx+1] == "~" and not codeMode:
             idx+=1
@@ -2403,6 +2468,13 @@ async def MdToImage(
         hMode = mode
         draw.text_blod_mode = mode
 
+    def ChangeItalicMode(mode:bool) -> None:
+        nonlocal iMode
+        iMode = mode
+        draw.italic_mode = mode
+
+    iMode = False
+
     nowlatexImageIdx = -1
     imageIdx = -1
     islatex = False
@@ -2646,6 +2718,12 @@ async def MdToImage(
         if i == "*" and idx+1<textS and text[idx+1] == "*" and not codeMode:
             idx+=1
             ChangeBlodMode(not hMode)
+            continue
+        if i == "*" and not codeMode and (iMode or _is_italic_marker(text, idx, textS, xidx)):
+            # 斜体标记：iMode 为真表示这是结束标记（直接关闭）；否则按起始标记规则判定。
+            # 切换斜体模式，并补一个空格宽度的错切留白（与测量遍一致）。
+            ChangeItalicMode(not iMode)
+            nx += nowf.GetSize(" ")[0]
             continue
         if i == "~" and idx+1<textS and text[idx+1] == "~" and not codeMode:
             idx+=1
@@ -2896,6 +2974,7 @@ async def MdToImage(
     
     ChangeLockColor(None)
     ChangeBlodMode(False)
+    ChangeItalicMode(False)
     ChangeDeleteLineMode(False)
     ChangeLinkMode(False)
 
