@@ -666,6 +666,8 @@ class ImageDrawPro(ImageDraw.ImageDraw):
             # 伪斜体：将字符绘制到独立图块后做 x 方向错切（shear），再贴回。
             # 字体本身无斜体字形，故用错切近似；错切会使字顶右移，调用方需在
             # 斜体片段前后补空格留白，避免与相邻字符重叠。
+            # 注：纯空白 token 跳过错切（无字形可斜），其宽度推进与测量遍一致，
+            # 不影响布局；仅斜体词内空格处呈现直立缺口，属伪斜体固有表现。
             self._draw_italic(xy, text, fill, useFont, mv, use_blod_mode and self.text_blod_mode)
         else:
             super().text((xy[0],xy[1]-mv),text,fill,useFont,*args,**kwargs)
@@ -686,7 +688,9 @@ class ImageDrawPro(ImageDraw.ImageDraw):
         """将文本绘制到临时图块并做 x 方向错切，模拟斜体后贴回主图。"""
         size = useFont.GetSize(text)
         w = max(1, size[0])
-        h = max(1, useFont.size + (size[1] if size[1] else useFont.size))
+        # GetSize 返回的高度已是完整字形高度，不再叠加 useFont.size，
+        # 否则 tile 过高会令 pad = int(h*shear) 过大、错切过度。
+        h = max(1, size[1] if size[1] else useFont.size)
         shear = 0.25  # 错切系数：值越大越倾斜
         pad = int(h * shear) + 2
         tile = Image.new("RGBA", (w + pad * 2, h), (0, 0, 0, 0))
@@ -2279,6 +2283,7 @@ async def MdToImage(
             if not codeMode:
                 nowf = font
             dr = 0
+            iMode = False  # 斜体不跨行：换行时复位，避免未闭合 * 蔓延整段
             continue
         if nx+xs+ex > maxX:
             nmaxX = max(nx,nmaxX)
@@ -2890,6 +2895,7 @@ async def MdToImage(
             if not codeMode:
                 nowf = font
             yMode = False
+            ChangeItalicMode(False)  # 斜体不跨行：换行时复位
             continue
         if nx+xs > maxX:
             nx = codeMode*codeLb
