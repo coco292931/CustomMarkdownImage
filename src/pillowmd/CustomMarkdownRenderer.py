@@ -2296,7 +2296,8 @@ async def MdToImage(
             hs.append(nmaxh)
             nmaxh = int(fontC.size)
             dr = 0
-        
+            iMode = False  # 斜体不跨行：软换行时同样复位
+
         nx += int(xs+ex)
         nmaxh = int(max(nmaxh,nowObjH))
 
@@ -2914,7 +2915,8 @@ async def MdToImage(
                 drawEffect.rectangle((lb,ub+ny-halfLineSpace,lb+nmaxX,ub+ny+hs[yidx-1]+halfLineSpace),style.citeUnderpainting)
                 for k in range(citeNum-1):
                     drawEffect.line((lb+style.citeDistance*(k+1),ub+ny-halfLineSpace,lb+style.citeDistance*(k+1),ub+ny+hs[yidx-1]+halfLineSpace),style.citeSplitLineColor,5)
-        
+            ChangeItalicMode(False)  # 斜体不跨行：软换行时同样复位
+
         b = style.title1FontSize - style.fontSize
         normalColor = tuple(int(style.textColor[i]+(style.textGradientEndColor[i]-style.textColor[i])/b*(nowf.size-style.fontSize)) for i in range(min(len(style.textColor),len(style.textGradientEndColor))))
         if linkMode:
