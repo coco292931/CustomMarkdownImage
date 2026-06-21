@@ -688,18 +688,22 @@ class ImageDrawPro(ImageDraw.ImageDraw):
         """将文本绘制到临时图块并做 x 方向错切，模拟斜体后贴回主图。"""
         size = useFont.GetSize(text)
         w = max(1, size[0])
-        # GetSize 返回的高度已是完整字形高度，不再叠加 useFont.size，
-        # 否则 tile 过高会令 pad = int(h*shear) 过大、错切过度。
-        h = max(1, size[1] if size[1] else useFont.size)
+        # tile 必须足够高以容纳上伸部/下伸部（GetSize 返回的是紧凑高度，
+        # 会裁掉 descender）。用 em 高度的 1.6 倍留足上下余量。
+        em = int(useFont.size)
+        h = max(1, int(em * 1.6))
         shear = 0.25  # 错切系数：值越大越倾斜
-        pad = int(h * shear) + 2
+        pad = int(em * shear) + 2  # 留白以 em 高度为基准，避免随 tile 高度膨胀
         tile = Image.new("RGBA", (w + pad * 2, h), (0, 0, 0, 0))
         td = ImageDraw.Draw(tile)
+        # 文字按 em 顶部对齐绘制；与主图 super().text 的 (x, y) 基准一致，
+        # 故下方贴回时用 (xy[1] - mv) 不另加偏移。
         td.text((pad, 0), text, fill, useFont)
         if blod:
             for a, b in [(-1, 0), (1, 0)]:
                 td.text((pad + a, b), text, fill, useFont)
-        # AFFINE：x' = x + shear*(h - y)，即底部不动、顶部右移
+        # AFFINE：x' = x + shear*(h - y)，即底部不动、顶部右移。
+        # 以 tile 高度 h 为参考使整块一致错切。
         tile = tile.transform(
             tile.size, Image.AFFINE,
             (1, shear, -shear * h, 0, 1, 0),
@@ -2296,7 +2300,8 @@ async def MdToImage(
             hs.append(nmaxh)
             nmaxh = int(fontC.size)
             dr = 0
-        
+            iMode = False  # 斜体不跨行：软换行时同样复位
+
         nx += int(xs+ex)
         nmaxh = int(max(nmaxh,nowObjH))
 
@@ -2914,7 +2919,8 @@ async def MdToImage(
                 drawEffect.rectangle((lb,ub+ny-halfLineSpace,lb+nmaxX,ub+ny+hs[yidx-1]+halfLineSpace),style.citeUnderpainting)
                 for k in range(citeNum-1):
                     drawEffect.line((lb+style.citeDistance*(k+1),ub+ny-halfLineSpace,lb+style.citeDistance*(k+1),ub+ny+hs[yidx-1]+halfLineSpace),style.citeSplitLineColor,5)
-        
+            ChangeItalicMode(False)  # 斜体不跨行：软换行时同样复位
+
         b = style.title1FontSize - style.fontSize
         normalColor = tuple(int(style.textColor[i]+(style.textGradientEndColor[i]-style.textColor[i])/b*(nowf.size-style.fontSize)) for i in range(min(len(style.textColor),len(style.textGradientEndColor))))
         if linkMode:
