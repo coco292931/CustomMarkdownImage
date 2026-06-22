@@ -2818,7 +2818,8 @@ async def MdToImage(
                     nowf = fontK
                 bMode = not bMode
                 # zx,zy = lb+nx,ub+ny+hs[yidx-1]
-                drawEffect.rectangle((lb+nx-1, ub+ny, lb+nx+1, ub+ny+hs[yidx-1]),style.expressionUnderpainting)
+                # 行内公式 $...$：$ 标记处的 2px 竖线背景不再单独绘制，由后续完整背景矩形
+                # 覆盖（见下方 latex 渲染处），避免竖线与下移后的背景错位。
                 nx += 2
                 continue
         if i == "`" and (text[idx-1]!="\\" if idx>=1 else True) and not codeMode and not bMode:
@@ -2950,13 +2951,19 @@ async def MdToImage(
             if latexs[0]["super"]:
                 # 行间公式（$$...$$）独占整行，按行高居中即可。
                 latexTop = ub + ny + (hs[yidx-1] - img.height) // 2 - img.space
+                bgTop = ub + ny
+                bgBottom = ub + ny + hs[yidx-1]
             else:
-                # 行内公式（$...$）应与同行正文的垂直中心对齐，而非行高中心：
-                # 正文按基线绘制、底对齐到 hs，其竖直中心约为 hs - font.size/2；
-                # 公式比正文高时若按行高居中会整体上浮、与文字错位。
+                # 行内公式（$...$）：整个公式图片（含 space）的竖直中心与正文文字的竖直中心对齐。
+                # 正文文字底边在 hs[yidx-1] 处，其竖直中心 = ub + ny + hs[yidx-1] - font.size/2。
+                # 故 latexTop = textCenterY - img.img.height / 2，使图片居中于文字中心。
+                # 背景使用整个公式的最大高度（含 space），避免角标子图背景凸出。
                 textCenterY = ub + ny + hs[yidx-1] - font.size / 2
-                latexTop = int(textCenterY - img.height / 2) - img.space
-            drawEffect.rectangle((lb+nx+xbase, ub+ny, lb+nx+img.width+xbase, ub+ny+hs[yidx-1]),style.expressionUnderpainting)
+                latexTop = int(textCenterY - img.img.height / 2)
+                bgHeight = latexs[0]["maxheight"] + img.space * 2
+                bgTop = int(textCenterY - bgHeight / 2)
+                bgBottom = bgTop + bgHeight
+            drawEffect.rectangle((lb+nx+xbase - (0 if latexs[0]["super"] else 2), bgTop, lb+nx+img.width+xbase, bgBottom),style.expressionUnderpainting)
             imgText.alpha_composite(
                 img.img, (lb+nx-img.space+xbase, latexTop)
             )
