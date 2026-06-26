@@ -693,20 +693,20 @@ class ImageDrawPro(ImageDraw.ImageDraw):
         em = int(useFont.size)
         h = max(1, int(em * 1.6))
         shear = 0.25  # 错切系数：值越大越倾斜
-        pad = int(em * shear) + 2  # 留白以 em 高度为基准，避免随 tile 高度膨胀
+        # 以文字主体中线（约 em/2）为错切支点：顶部右移、底部左移、中线不动，
+        # 使倾斜后的视觉重心仍居中，而非整体偏右。两侧各需 shear*em/2 的留白。
+        yc = em / 2
+        pad = int(shear * yc) + 2
         tile = Image.new("RGBA", (w + pad * 2, h), (0, 0, 0, 0))
         td = ImageDraw.Draw(tile)
-        # 文字按 em 顶部对齐绘制；与主图 super().text 的 (x, y) 基准一致，
-        # 故下方贴回时用 (xy[1] - mv) 不另加偏移。
         td.text((pad, 0), text, fill, useFont)
         if blod:
             for a, b in [(-1, 0), (1, 0)]:
                 td.text((pad + a, b), text, fill, useFont)
-        # AFFINE：x' = x + shear*(h - y)，即底部不动、顶部右移。
-        # 以 tile 高度 h 为参考使整块一致错切。
+        # AFFINE：x_src = x_dst + shear*(y_dst - yc)，即 y=yc 处不动、上右下左对称错切。
         tile = tile.transform(
             tile.size, Image.AFFINE,
-            (1, shear, -shear * h, 0, 1, 0),
+            (1, shear, -shear * yc, 0, 1, 0),
             resample=Image.BICUBIC,
         )
         self._image.alpha_composite(tile, (int(xy[0] - pad), int(xy[1] - mv)))
@@ -2818,7 +2818,8 @@ async def MdToImage(
                     nowf = fontK
                 bMode = not bMode
                 # zx,zy = lb+nx,ub+ny+hs[yidx-1]
-                drawEffect.rectangle((lb+nx-1, ub+ny, lb+nx+1, ub+ny+hs[yidx-1]),style.expressionUnderpainting)
+                # 行内公式 $...$：$ 标记处的 2px 竖线背景不再单独绘制，由后续完整背景矩形
+                # 覆盖（见下方 latex 渲染处），避免竖线与下移后的背景错位。
                 nx += 2
                 continue
         if i == "`" and (text[idx-1]!="\\" if idx>=1 else True) and not codeMode and not bMode:
@@ -2947,9 +2948,24 @@ async def MdToImage(
             if debug:
                 print("islatex")
             img: pillowlatex.LaTeXImage = latexs[0]["images"][nowlatexImageIdx]
-            drawEffect.rectangle((lb+nx+xbase, ub+ny, lb+nx+img.width+xbase, ub+ny+hs[yidx-1]),style.expressionUnderpainting)
+            if latexs[0]["super"]:
+                # 行间公式（$$...$$）独占整行，按行高居中即可。
+                latexTop = ub + ny + (hs[yidx-1] - img.height) // 2 - img.space
+                bgTop = ub + ny
+                bgBottom = ub + ny + hs[yidx-1]
+            else:
+                # 行内公式（$...$）：整个公式图片（含 space）的竖直中心与正文文字的竖直中心对齐。
+                # 正文文字底边在 hs[yidx-1] 处，其竖直中心 = ub + ny + hs[yidx-1] - font.size/2。
+                # 故 latexTop = textCenterY - img.img.height / 2，使图片居中于文字中心。
+                # 背景使用整个公式的最大高度（含 space），避免角标子图背景凸出。
+                textCenterY = ub + ny + hs[yidx-1] - font.size / 2
+                latexTop = int(textCenterY - img.img.height / 2)
+                bgHeight = latexs[0]["maxheight"] + img.space * 2
+                bgTop = int(textCenterY - bgHeight / 2)
+                bgBottom = bgTop + bgHeight
+            drawEffect.rectangle((lb+nx+xbase - (0 if latexs[0]["super"] else 2), bgTop, lb+nx+img.width+xbase, bgBottom),style.expressionUnderpainting)
             imgText.alpha_composite(
-                img.img, (lb+nx-img.space+xbase, ub+ny+(hs[yidx-1]-img.height) // 2-img.space)
+                img.img, (lb+nx-img.space+xbase, latexTop)
             )
         elif isImage and isinstance(nowImage,Image.Image):
             #drawImage.rectangle((lb+nx-1,ub+ny+hs[yidx-1]-nowImage.size[1]-1,lb+nx+nowImage.size[0]+1,ub+ny+hs[yidx-1]+1),None,"#99FFCCAA",2)
